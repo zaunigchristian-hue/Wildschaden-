@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
