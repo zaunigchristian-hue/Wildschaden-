@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
@@ -14,13 +14,18 @@ const L = {
   termin: ['Vorbesichtigung', 'Endschätzung', 'Nachschätzung', 'Sonstiger Termin'],
   taetigkeit: ['Vorbereitung', 'Ortstermin / Schätzung', 'Nachbereitung / Protokoll', 'Sonstiges'],
   grad: ['leicht', 'mittel', 'schwer'],
-  status: ['offen', 'geschätzt', 'abgerechnet']
+  status: ['offen', 'geschätzt', 'abgerechnet'],
+  empfaenger: ['Amt/Gemeinde', 'Geschädigter', 'Ersatzpflichtiger', 'Sonstiger'],
+  ustRechnung: ['Kleinunternehmer (§ 19 UStG)', 'Regelbesteuert'],
+  sigRolle: ['Geschädigter', 'Ersatzpflichtiger', 'Zeuge', 'Vertreter Jagdvorstand', 'Sonstige Person']
 };
+const SIG_TEXTE = ['Anwesenheit beim Ortstermin bestätigt.', 'Protokoll zur Kenntnis genommen.', 'Mit dem Ergebnis der Schätzung einverstanden (gütliche Einigung).'];
 const GRAD_MASSNAHME = { leicht: 'Schleppen / Walzen', mittel: 'Schleppen + Walzen + Nachsaat', schwer: 'Pflügen / Fräsen + Neuansaat' };
 
 /* Werte aus deiner Vorlage (Stand der hochgeladenen Datei). Beim Laden der Vorlage werden sie automatisch ersetzt. */
 const DEFAULT_SETTINGS = {
-  stamm: { name: 'Christian Zaunig', strasse: 'Hainstraße 8', ort: '03238 Lieskau', telefon: '0160 6498407', email: 'zaunigchristian@gmail.com',
+  stamm: { name: 'Christian Zaunig', strasse: 'Hainstraße 8', telefon: '0160 6498407', email: 'zaunigchristian@gmail.com',
+    steuernr: '', iban: 'DE78 1806 2678 0000 2995 96', bank: '', bestellt: '', ustModus: 'Kleinunternehmer (§ 19 UStG)', ort: '03238 Lieskau',
     stundensatz: 40, tagesmax: 200, kmgeld: 0.3, ust: 0.19, durchschnitt: 0.078, frist: 7 },
   preise: [
     ['Winterweizen (Brotweizen)', 'Getreide', 't Korn', 200, 80, 150], ['Winterweizen (Futterweizen)', 'Getreide', 't Korn', 185, 80, 150],
@@ -107,8 +112,16 @@ function newFall() {
     kenntnis: '', anmeldung: '', sbProz: '', sbEuro: '', deckel: '', pauschale: '', ustGesch: '', bemerkung: '',
     termine: [], stellen: [newStelle()],
     ertrag: { methode: '', proben: [{}, {}, {}, {}, {}], betrieb: '', schaetzung: '', stroh: '' },
-    wieder: [], saat: [], zeiten: [], fotoSeq: 0
+    wieder: [], saat: [], zeiten: [], fotoSeq: 0,
+    prot: { ort: '', datum: '', fotos: true }, sigs: [], rech: { empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' }
   };
+}
+/* ältere Fälle (Stufe 1) um neue Felder ergänzen */
+function normFall(f) {
+  f.prot = Object.assign({ ort: '', datum: '', fotos: true }, f.prot || {});
+  f.sigs = f.sigs || [];
+  f.rech = Object.assign({ empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' }, f.rech || {});
+  return f;
 }
 function newStelle() { return { id: uid(), modus: 'lb', laenge: '', breite: '', poly: [], verlust: '', grad: '', lat: '', lon: '', acc: '', fotos: [], termin: '', bem: '' }; }
 
@@ -431,8 +444,9 @@ function vExport() {
     ${r.kuerzung ? `<div class="sum"><span>Kürzung auf Höchstbetrag</span><span class="num">−${eur(r.kuerzung)}</span></div>` : ''}
     ${r.zuschlag ? `<div class="sum"><span>zzgl. Durchschnittssatz ${fmt((S.stamm.durchschnitt || 0) * 100, 1)} %</span><span class="num">${eur(r.zuschlag)}</span></div>` : ''}
     <div class="sum total"><span>Schadensersatz gesamt</span><span class="num">${eur(r.gesamt)}</span></div>
-    <p class="muted">Vorschau zur Orientierung am Feld. Verbindlich rechnet die Excel-Datei.</p>
+    <p class="muted">Protokoll-PDF und Rechnung rechnen mit genau diesen Werten.</p>
     ${fr[0] === 'bad' ? `<div class="note bad">${esc(fr[1])}</div>` : ''}</div>
+${vPdf(r)}
   <div class="card"><h2>Excel-Datei erzeugen</h2>
     ${S.vorlageName ? `<p class="muted" style="margin-top:0">Vorlage: <b>${esc(S.vorlageName)}</b> (geladen ${esc(S.vorlageDatum || '')})</p>` : `<div class="note warn">Noch keine Vorlage geladen. Unter ⚙ Einstellungen einmal deine Excel-Vorlage auswählen.</div>`}
     ${warn.length ? `<div class="note warn">Hinweis: ${warn.map(esc).join(' · ')}</div>` : ''}
@@ -442,6 +456,161 @@ function vExport() {
     <button class="btn wide" data-act="fotozip">🗂 Fotos als ZIP</button><div id="zipOut"></div></div>`;
 }
 
+/* ---------- Stufe 2: Protokoll & Rechnung ---------- */
+function nextRechNr() {
+  const y = new Date().getFullYear();
+  const used = faelle.map(f => (f.rech && f.rech.nr) || '').filter(n => n.startsWith(y + '-')).map(n => parseInt(n.split('-')[1], 10) || 0);
+  return y + '-' + String((used.length ? Math.max(...used) : 0) + 1).padStart(3, '0');
+}
+function rechZeiten(f) {
+  return f.zeiten.filter(z => !z.start && num(z.stunden)).map(z => ({ datum: z.datum, taetigkeit: z.taetigkeit || '', beschr: z.beschr || '', std: num(z.stunden) || 0 }))
+    .sort((a, b) => (a.datum || '').localeCompare(b.datum || ''));
+}
+function rechBetraege(f) {
+  const st = S.stamm, tage = {};
+  let km = 0;
+  f.zeiten.filter(z => !z.start).forEach(z => { tage[z.datum || '?'] = (tage[z.datum || '?'] || 0) + (num(z.stunden) || 0); km += num(z.km) || 0; });
+  const roh = Object.values(tage).reduce((a, h) => a + h * st.stundensatz, 0);
+  const ged = Object.values(tage).reduce((a, h) => a + Math.min(h * st.stundensatz, st.tagesmax), 0);
+  const fahrt = km * st.kmgeld, netto = ged + fahrt;
+  const regel = (f.rech.ust || st.ustModus || '').startsWith('Regel');
+  const ust = regel ? Math.round(netto * st.ust * 100) / 100 : 0;
+  return { honorarRoh: roh, kuerzung: roh - ged, km, fahrt, netto, regel, ust, brutto: netto + ust };
+}
+function empfaenger(f) {
+  const e = f.rech.empf || 'Amt/Gemeinde';
+  if (e === 'Geschädigter') return { name: f.gesch.name, anschrift: f.gesch.anschrift };
+  if (e === 'Ersatzpflichtiger') return { name: f.ersatz.name, anschrift: f.ersatz.anschrift };
+  if (e === 'Sonstiger') return { name: f.rech.sonstName, anschrift: f.rech.sonstAnschrift };
+  return { name: f.stelle, anschrift: f.stelleAnschrift };
+}
+function vPdf(r) {
+  const p = cur.prot, rc = cur.rech, b = rechBetraege(cur), emp = empfaenger(cur);
+  const sigs = cur.sigs;
+  return `<div class="card"><h2>Schätzprotokoll (PDF)</h2>
+    ${S.signatur ? '' : `<div class="note warn">Deine Unterschrift fehlt noch. <button class="btn sm" data-act="sigOwn">✍ Jetzt unterschreiben</button></div>`}
+    <div class="row">${F('Ort', 'prot.ort', { ph: 'z. B. Lieskau' })}${F('Datum', 'prot.datum', { type: 'date' })}</div>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" data-chk="prot.fotos" ${p.fotos ? 'checked' : ''} style="width:24px;min-height:24px"> <span style="margin:0;color:var(--ink)">Fotos als Anlage anhängen</span></label>
+    <h3 style="margin-top:14px">Unterschriften der Beteiligten <span class="muted" style="font-weight:400">(freiwillig)</span></h3>
+    ${sigs.map((g, i) => `<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+      <div class="row">${Sel('Rolle', 'sigs.' + i + '.rolle', L.sigRolle)}${F('Name', 'sigs.' + i + '.name')}</div>
+      ${Sel('Erklärung', 'sigs.' + i + '.text', SIG_TEXTE)}
+      ${g.png ? `<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px;text-align:center"><img src="${g.png}" alt="Unterschrift" style="max-width:100%;max-height:90px"></div><p class="muted">unterschrieben ${esc(new Date(g.zeit).toLocaleString('de-DE'))}</p>` : ''}
+      <div class="btns"><button class="btn ${g.png ? '' : 'pri'}" data-act="sigParty" data-i="${i}">✍ ${g.png ? 'Neu unterschreiben' : 'Unterschreiben lassen'}</button><button class="btn sm bad" data-act="delSig" data-i="${i}">Entfernen</button></div></div>`).join('')}
+    <div class="btns"><button class="btn" data-act="addSig">＋ Beteiligten unterschreiben lassen</button></div>
+    <div style="margin-top:14px"><button class="btn pri wide" data-act="protPdf">📄 Schätzprotokoll als PDF</button></div>
+    <div id="protOut"></div></div>
+  <div class="card"><h2>Schätzerrechnung (PDF)</h2>
+    ${Sel('Empfänger', 'rech.empf', L.empfaenger, { re: 1 })}
+    ${rc.empf === 'Sonstiger' ? F('Name', 'rech.sonstName') + F('Anschrift', 'rech.sonstAnschrift') : `<p class="muted" style="margin-top:-4px">${esc([emp.name, emp.anschrift].filter(Boolean).join(', ') || 'Name/Anschrift beim Fall eintragen')}</p>`}
+    <div class="row">${F('Rechnungs-Nr.', 'rech.nr', { ph: S.naechsteNr || nextRechNr() })}${F('Rechnungsdatum', 'rech.datum', { type: 'date' })}</div>
+    ${Sel('Umsatzsteuer', 'rech.ust', L.ustRechnung, { re: 1 })}
+    <div class="sum"><span>Honorar ${fmt(r.std)} h${b.kuerzung > 0.004 ? ' (gedeckelt)' : ''}</span><span class="num">${eur(b.honorarRoh - b.kuerzung)}</span></div>
+    <div class="sum"><span>Fahrtkosten ${fmt(b.km, 0)} km</span><span class="num">${eur(b.fahrt)}</span></div>
+    ${b.regel ? `<div class="sum"><span>USt ${fmt(S.stamm.ust * 100, 0)} %</span><span class="num">${eur(b.ust)}</span></div>` : ''}
+    <div class="sum total"><span>Rechnungsbetrag</span><span class="num">${eur(b.brutto)}</span></div>
+    ${!S.stamm.steuernr ? '<div class="note warn">Steuernummer fehlt – unter ⚙ Einstellungen eintragen.</div>' : ''}
+    <div style="margin-top:10px"><button class="btn pri wide" data-act="rechPdf" ${rechZeiten(cur).length ? '' : 'disabled'}>🧾 Rechnung als PDF</button></div>
+    ${rechZeiten(cur).length ? '' : '<p class="muted">Erst unter „Zeiten“ Stunden eintragen.</p>'}
+    <div id="rechOut"></div></div>`;
+}
+
+/* Unterschriften-Feld (Finger) */
+function sigPad(title, hint) {
+  return new Promise(resolve => {
+    openDlg(title, `<p class="muted" style="margin-top:0">${esc(hint || 'Mit dem Finger im weißen Feld unterschreiben.')}</p>
+      <canvas id="sigC" style="width:100%;height:42vh;max-height:320px;background:#fff;border:2px dashed var(--line);border-radius:12px;touch-action:none;display:block"></canvas>
+      <div class="btns"><button class="btn" id="sigClr">Löschen</button><button class="btn pri" id="sigOk" style="flex:1">Übernehmen</button></div>`);
+    const c = $('#sigC'), dpr = window.devicePixelRatio || 1;
+    const fit = () => { const r = c.getBoundingClientRect(); c.width = r.width * dpr; c.height = r.height * dpr; };
+    fit();
+    const g = c.getContext('2d'); let drawing = false, last = null, ink = false;
+    const P = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr, e.pressure || 0.5]; };
+    c.onpointerdown = e => { drawing = true; last = P(e); c.setPointerCapture(e.pointerId); g.beginPath(); g.arc(last[0], last[1], 1.4 * dpr, 0, 7); g.fillStyle = '#16267a'; g.fill(); ink = true; };
+    c.onpointermove = e => {
+      if (!drawing) return;
+      const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const ev of pts) {
+        const p = P(ev);
+        g.strokeStyle = '#16267a'; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = (2.2 + p[2] * 1.6) * dpr;
+        g.beginPath(); g.moveTo(last[0], last[1]); g.lineTo(p[0], p[1]); g.stroke(); last = p;
+      }
+    };
+    c.onpointerup = c.onpointercancel = () => { drawing = false; };
+    $('#sigClr').onclick = () => { g.clearRect(0, 0, c.width, c.height); ink = false; };
+    let done = false;
+    $('#sigOk').onclick = () => {
+      if (!ink) { toast('Bitte zuerst unterschreiben'); return; }
+      done = true; $('#dlg').close(); resolve(trimCanvas(c));
+    };
+    $('#dlg').addEventListener('close', () => { if (!done) resolve(null); }, { once: true });
+  });
+}
+function trimCanvas(c) {
+  const g = c.getContext('2d'), { width: w, height: h } = c, d = g.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const pad = 12, sx = Math.max(0, x0 - pad), sy = Math.max(0, y0 - pad), sw = Math.min(w, x1 + pad) - sx, sh = Math.min(h, y1 + pad) - sy;
+  const sc = Math.min(1, 900 / sw);
+  const o = document.createElement('canvas'); o.width = Math.round(sw * sc); o.height = Math.round(sh * sc);
+  o.getContext('2d').drawImage(c, sx, sy, sw, sh, 0, 0, o.width, o.height);
+  return o.toDataURL('image/png');
+}
+
+/* Daten für die PDFs zusammenstellen */
+async function pdfCtx(f, withFotos) {
+  const r = calc(f);
+  const fotosAll = (await DB.byIndex('fotos', 'fallId', f.id)).sort((a, b) => a.nr - b.nr);
+  const idx = Object.fromEntries(f.stellen.map((s, i) => [s.id, i + 1]));
+  const stellen = [];
+  let nr = 0;
+  for (const s of f.stellen) {
+    nr++;
+    const a = stelleFlaeche(s); if (!(a > 0)) continue;
+    const v = num(s.verlust);
+    stellen.push({ nr, flaeche: a, eff: a * (v == null ? 1 : v / 100), verlust: v == null ? '100 %' : fmt(v, 0) + ' %', grad: s.grad || '',
+      mass: s.modus === 'gps' ? 'GPS-Umgang (' + s.poly.length + ' Pkt.)' : fmt(num(s.laenge), 1) + ' × ' + fmt(num(s.breite), 1) + ' m',
+      gps: s.lat && s.lon ? num(s.lat).toFixed(5) + ' N, ' + num(s.lon).toFixed(5) + ' E' : '', fotos: await fotoNrText(s), bem: s.bem || '' });
+  }
+  const fotos = [];
+  if (withFotos) for (const p of fotosAll) fotos.push({ nr: p.nr, stelle: idx[p.stelleId] || '?', bytes: new Uint8Array(await p.blob.arrayBuffer()),
+    zeit: new Date(p.time).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }), gps: p.lat ? p.lat.toFixed(5) + ' N, ' + p.lon.toFixed(5) + ' E' : '' });
+  const z = rechZeiten(f);
+  const ds = z.map(x => x.datum).filter(Boolean);
+  return {
+    r, stellen, fotos, num, frist: fristInfo, grad: GRAD_MASSNAHME, zeiten: z, betraege: rechBetraege(f), empfaenger,
+    zeitraum: ds.length ? (ds[0] === ds[ds.length - 1] ? dDE(ds[0]) : dDE(ds[0]) + ' – ' + dDE(ds[ds.length - 1])) : '',
+    wSatz: w => { const q = w.quelle || 'KTBL/MR-Satz'; if (q === 'Lohnunternehmer') return 'laut Rechnung'; if (q === 'Eigene Kosten') return fmt(num(w.eigen)) + ' €/ha'; const k = S.ktbl.find(x => x.gang === w.gang); return k && k.satz != null ? fmt(k.satz) + ' €/ha' : '–'; },
+    sSatz: s => { const m = s.methode || 'kg/ha × Preis'; if (m === 'Laut Rechnung') return 'laut Rechnung'; if (m === 'Pauschal €/ha') return fmt(num(s.pauschal)) + ' €/ha'; const g = S.saatgut.find(x => x.sorte === s.sorte); return g ? fmt(g.kgha, 0) + ' kg/ha × ' + fmt(g.preis) + ' €/kg' : '–'; }
+  };
+}
+async function makePdf(kind) {
+  const out = $(kind === 'prot' ? '#protOut' : '#rechOut');
+  out.innerHTML = '<p class="muted">Erzeuge PDF …</p>';
+  try {
+    if (kind === 'prot') {
+      if (!cur.prot.datum) cur.prot.datum = today();
+      const ctx = await pdfCtx(cur, cur.prot.fotos);
+      const bytes = await PDFX.protokoll(cur, S, ctx.r, ctx);
+      lastExport = { blob: new Blob([bytes], { type: 'application/pdf' }), name: 'Schaetzprotokoll_' + fileSafe(cur.az) + '.pdf' };
+      if (cur.status === 'offen') cur.status = 'geschätzt';
+    } else {
+      if (!cur.rech.nr) { cur.rech.nr = S.naechsteNr || nextRechNr(); S.naechsteNr = incNr(cur.rech.nr); await saveSettings(); }
+      if (!cur.rech.datum) cur.rech.datum = today();
+      if (!cur.rech.ust) cur.rech.ust = S.stamm.ustModus;
+      const ctx = await pdfCtx(cur, false);
+      const bytes = await PDFX.rechnung(cur, S, ctx);
+      lastExport = { blob: new Blob([bytes], { type: 'application/pdf' }), name: 'Rechnung_' + fileSafe(cur.rech.nr) + '_' + fileSafe(cur.az) + '.pdf' };
+    }
+    save(); render();
+    const o = $(kind === 'prot' ? '#protOut' : '#rechOut');
+    o.innerHTML = `<div class="note ok">Fertig: <b>${esc(lastExport.name)}</b></div>
+      <div class="btns">${canShare(lastExport.blob, lastExport.name) ? '<button class="btn pri" data-act="shareX">📤 Teilen</button>' : ''}<button class="btn" data-act="openX">👁 Ansehen</button><button class="btn" data-act="dlX">⬇ Speichern</button></div>`;
+    o.scrollIntoView({ block: 'nearest' });
+  } catch (e) { out.innerHTML = `<div class="note bad">Fehler beim PDF: ${esc(e.message)}</div>`; console.error(e); }
+}
+function incNr(n) { const m = /^(.*?)(\d+)$/.exec(n); return m ? m[1] + String(+m[2] + 1).padStart(m[2].length, '0') : n; }
+
 function vSettings() {
   const st = S.stamm;
   return `<div class="card"><h2>Excel-Vorlage</h2>
@@ -449,9 +618,16 @@ function vSettings() {
     <p class="muted">Wähle deine Datei „…_Vorlage_unterschrieben.xlsx“. Die App speichert sie und füllt für jeden Fall eine Kopie. Preise, Sätze und Stammdaten werden dabei automatisch aus der Vorlage übernommen.</p>
     <label class="btn pri wide" style="margin:0">📂 Vorlage auswählen<input type="file" id="tplIn" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label>
     <div id="tplOut"></div></div>
-  <div class="card"><h2>Stammdaten</h2>
+  <div class="card"><h2>Meine Unterschrift</h2>
+    ${S.signatur ? `<div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center"><img src="${S.signatur}" alt="Unterschrift" style="max-width:100%;max-height:110px"></div>` : '<div class="note warn">Noch keine Unterschrift hinterlegt. Sie erscheint auf jedem Schätzprotokoll.</div>'}
+    <div class="btns"><button class="btn pri" data-act="sigOwn">✍ ${S.signatur ? 'Neu unterschreiben' : 'Jetzt unterschreiben'}</button>${S.signatur ? '<button class="btn bad" data-act="sigOwnDel">Löschen</button>' : ''}</div>
+    <p class="muted">Tipp: Handy quer halten, dann hast du mehr Platz.</p></div>
+  <div class="card"><h2>Stammdaten für Protokoll und Rechnung</h2>
     <p class="muted" style="margin-top:0">${esc(S.quelle || '')}</p>
-    <div class="sum"><span>Schätzer</span><span>${esc(st.name || '')}</span></div>
+    ${[['Name', 'name'], ['Straße, Nr.', 'strasse'], ['PLZ, Ort', 'ort'], ['Telefon', 'telefon'], ['E-Mail', 'email'], ['Bestellt durch (Landkreis/Amt)', 'bestellt'], ['Steuernummer', 'steuernr'], ['IBAN', 'iban'], ['Bank', 'bank']]
+      .map(([l, k]) => `<label><span>${l}</span><input data-s="${k}" value="${esc(st[k] || '')}"></label>`).join('')}
+    <label><span>Umsatzsteuer auf deinen Rechnungen</span><select data-s="ustModus">${L.ustRechnung.map(x => `<option${x === st.ustModus ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+    <label><span>Nächste Rechnungsnummer</span><input data-s="naechsteNr" value="${esc(S.naechsteNr || nextRechNr())}"></label>
     <div class="sum"><span>Stundensatz</span><span class="num">${eur(st.stundensatz)}/h</span></div>
     <div class="sum"><span>Höchstbetrag je Kalendertag</span><span class="num">${eur(st.tagesmax)}</span></div>
     <div class="sum"><span>Kilometergeld</span><span class="num">${eur(st.kmgeld)}/km</span></div>
@@ -467,7 +643,7 @@ function vSettings() {
     <div class="btns"><button class="btn pri" data-act="backup">💾 Sicherung erstellen</button>
     <label class="btn" style="margin:0">↩ Sicherung einlesen<input type="file" id="restoreIn" accept=".zip,application/zip" class="hidden"></label></div><div id="bkOut"></div>
     ${S.lastBackup ? `<p class="muted">Letzte Sicherung: ${esc(S.lastBackup)}</p>` : ''}</div>
-  <p class="muted" style="text-align:center">Wildschaden Feld · Version ${APP_VERSION} · Stufe 1</p>`;
+  <p class="muted" style="text-align:center">Wildschaden Feld · Version ${APP_VERSION} · Stufe 2</p>`;
 }
 
 /* ---------- Live-Werte aktualisieren, ohne neu zu zeichnen ---------- */
@@ -585,7 +761,7 @@ async function doExport() {
   try {
     const tpl = await DB.get('kv', 'vorlage');
     if (!tpl) throw new Error('Vorlage nicht gefunden – bitte neu laden.');
-    const { blob, rep } = await XL.exportFall(await tpl.arrayBuffer(), cur, { stellenRows: await stellenRows() });
+    const { blob, rep } = await XL.exportFall(await tpl.arrayBuffer(), cur, { stellenRows: await stellenRows(), stamm: S.stamm });
     const name = 'WS_' + [fileSafe(cur.az), fileSafe(cur.gesch.name), fileSafe(cur.flurstueck && 'Fl' + cur.flurstueck)].filter(Boolean).join('_') + '.xlsx';
     lastExport = { blob, name };
     out.innerHTML = `<div class="note ok">Fertig: <b>${esc(name)}</b> · ${rep.written} Werte übertragen.</div>
@@ -671,7 +847,7 @@ async function restore(file) {
     for (const m of d.fotos || []) { const zf = z.file('fotos/' + m.id + '.jpg'); if (zf) await DB.put('fotos', { ...m, blob: new Blob([await zf.async('arraybuffer')], { type: 'image/jpeg' }) }); }
     const t = z.file('vorlage.xlsx');
     if (t && d.settings) { await DB.put('kv', new Blob([await t.async('arraybuffer')]), 'vorlage'); S = Object.assign({}, DEFAULT_SETTINGS, d.settings); await saveSettings(); }
-    faelle = await DB.all('faelle'); kontakte = await DB.all('kontakte');
+    faelle = (await DB.all('faelle')).map(normFall); kontakte = await DB.all('kontakte');
     render(); toast('Sicherung eingelesen');
   } catch (e) { toast('Sicherung konnte nicht gelesen werden: ' + e.message, 4000); }
 }
@@ -681,12 +857,14 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'search') { view.q = t.value; const pos = t.selectionStart; render(); const s = $('#search'); s.focus(); s.setSelectionRange(pos, pos); return; }
   if (t.dataset.k && cur) { setPath(cur, t.dataset.k, t.value); save(); if (t.tagName === 'SELECT' && t.dataset.re) render(); else live(); }
+  if (t.dataset.s) { if (t.dataset.s === 'naechsteNr') S.naechsteNr = t.value; else S.stamm[t.dataset.s] = t.value; clearTimeout(t._st); t._st = setTimeout(saveSettings, 300); }
 });
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.dataset.photo !== undefined && t.files.length) { await addPhotos(+t.dataset.photo, [...t.files]); t.value = ''; }
   if (t.id === 'tplIn' && t.files[0]) loadTemplate(t.files[0]);
   if (t.id === 'restoreIn' && t.files[0]) restore(t.files[0]);
+  if (t.dataset.chk && cur) { setPath(cur, t.dataset.chk, t.checked); save(); }
 });
 document.addEventListener('click', async e => {
   const tab = e.target.closest('[data-tab]'); if (tab) { view.tab = tab.dataset.tab; render(); window.scrollTo(0, 0); return; }
@@ -694,7 +872,7 @@ document.addEventListener('click', async e => {
   const a = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
   switch (a) {
     case 'new': cur = newFall(); faelle.push(cur); await DB.put('faelle', cur); view = { name: 'fall', tab: 'fall' }; render(); break;
-    case 'open': cur = faelle.find(f => f.id === b.dataset.id); view = { name: 'fall', tab: 'fall', q: view.q, st: view.st }; render(); window.scrollTo(0, 0); break;
+    case 'open': cur = normFall(faelle.find(f => f.id === b.dataset.id)); view = { name: 'fall', tab: 'fall', q: view.q, st: view.st }; render(); window.scrollTo(0, 0); break;
     case 'filter': view.st = b.dataset.v; render(); break;
     case 'status': cur.status = b.dataset.v; save(); render(); break;
     case 'delFall':
@@ -760,6 +938,19 @@ document.addEventListener('click', async e => {
     case 'shareX': shareFile(lastExport.blob, lastExport.name); break;
     case 'dlX': download(lastExport.blob, lastExport.name); break;
     case 'backup': backup(); break;
+    case 'sigOwn': { const png = await sigPad('Meine Unterschrift', 'So unterschreibst du später jedes Schätzprotokoll.'); if (png) { S.signatur = png; await saveSettings(); render(); toast('Unterschrift gespeichert'); } break; }
+    case 'sigOwnDel': if (confirm('Deine Unterschrift löschen?')) { delete S.signatur; await saveSettings(); render(); } break;
+    case 'addSig': cur.sigs.push({ id: uid(), rolle: cur.sigs.some(x => x.rolle === 'Geschädigter') ? 'Ersatzpflichtiger' : 'Geschädigter', name: '', text: SIG_TEXTE[0], png: '', zeit: 0 });
+      { const g = cur.sigs[cur.sigs.length - 1]; g.name = g.rolle === 'Geschädigter' ? cur.gesch.name : cur.ersatz.name; } save(); render(); break;
+    case 'delSig': if (confirm('Unterschrift entfernen?')) { cur.sigs.splice(i, 1); save(); render(); } break;
+    case 'sigParty': {
+      const g = cur.sigs[i];
+      const png = await sigPad('Unterschrift ' + g.rolle, (g.name ? g.name + ': ' : '') + (g.text || '') + ' Mit dem Finger unterschreiben.');
+      if (png) { g.png = png; g.zeit = Date.now(); save(); render(); } break;
+    }
+    case 'protPdf': makePdf('prot'); break;
+    case 'rechPdf': makePdf('rech'); break;
+    case 'openX': { const u = URL.createObjectURL(lastExport.blob); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); break; }
   }
 });
 $('#back').onclick = () => {
@@ -775,7 +966,7 @@ $('#dlgX').onclick = () => $('#dlg').close();
   try {
     await DB.open();
     S = Object.assign({}, DEFAULT_SETTINGS, (await DB.get('kv', 'settings')) || {});
-    faelle = await DB.all('faelle'); kontakte = await DB.all('kontakte');
+    faelle = (await DB.all('faelle')).map(normFall); kontakte = await DB.all('kontakte');
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) {
     $('#main').innerHTML = `<div class="note bad">Speicher nicht verfügbar: ${esc(e.message)}. Bitte die App nicht im Inkognito-Modus öffnen.</div>`; return;

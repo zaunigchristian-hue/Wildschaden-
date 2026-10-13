@@ -303,6 +303,26 @@
     else await fillTable(ze, rep, { anchor: 'Tätigkeit', max: 20, what: 'Zeiterfassung',
       cols: { 'Datum': 'datum', 'Tätigkeit': 'taet', 'Beschreibung': 'beschr', 'Stunden': 'std', 'km': 'km' },
       data: f.zeiten.filter(z => !z.start).map(z => ({ datum: dateSerial(z.datum) || '', taet: z.taetigkeit || '', beschr: z.beschr || '', std: n(z.stunden), km: n(z.km) })) });
+    const re = await wb.sheet('Rechnung');
+    if (re && f.rech) {
+      const rc = f.rech;
+      const sonst = rc.empf === 'Sonstiger' ? [rc.sonstName, rc.sonstAnschrift].filter(Boolean).join(', ') : '';
+      for (const [lab, v, pre] of [['Empfänger:', rc.empf || ''], ['Nur bei „Sonstiger“', sonst, true], ['Rechnungs-Nr.', rc.nr || ''],
+        ['Rechnungsdatum', dateSerial(rc.datum) || ''], ['Umsatzsteuer', rc.ust || '']]) {
+        const p = re.find(lab, { prefix: !!pre }); if (!p) continue;
+        const r = re.rightOf(p);
+        if (re.set(r.row, r.col, v)) { if (v !== '') rep.written++; }
+      }
+    }
+    const sd = await wb.sheet('Stammdaten');
+    if (sd && opts.stamm) {
+      for (const [lab, k, pre] of [['Steuernummer', 'steuernr'], ['Bank', 'bank'], ['Bestellt durch', 'bestellt', true]]) {
+        const v = opts.stamm[k]; if (!v) continue;
+        const p = sd.find(lab, { prefix: !!pre }); if (!p) continue;
+        const r = sd.rightOf(p);
+        if (sd.value(r.row, r.col) === null && sd.set(r.row, r.col, v)) rep.written++;
+      }
+    }
     const blob = await wb.save();
     return { blob, rep };
   }
