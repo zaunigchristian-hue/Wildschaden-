@@ -255,6 +255,14 @@
       d.table([{ t: 'Schadgrad', w: 1 }, { t: 'Fläche m²', w: 1, align: 'right' }, { t: 'Fläche ha', w: 1, align: 'right' }, { t: 'Empfohlene Maßnahme', w: 2 }],
         ['leicht', 'mittel', 'schwer'].map(g => [g, fmt(r.grad[g], 1), fmt(r.grad[g] / 10000, 4), ctx.grad[g]]));
     }
+    if (ctx.map) {
+      const im = await d.image(ctx.map.bytes, 'jpg', d.W, 330);
+      d.need(im.h + 30); d.y -= 6;
+      d.text('Lageplan der Schadstellen (' + ctx.map.count + ' mit GPS-Position)', M.l, d.y - 10, { size: 9.5, bold: true }); d.y -= 16;
+      im.draw(M.l, d.y - im.h);
+      d.page.drawRectangle({ x: M.l, y: d.y - im.h, width: im.w, height: im.h, borderColor: LINE(), borderWidth: 0.6 });
+      d.y -= im.h + 8;
+    }
     d.h2('C) Wiederherstellung');
     if (f.wieder.length) {
       d.table([{ t: 'Arbeitsgang', w: 30 }, { t: 'Quelle', w: 18 }, { t: 'Fläche ha', w: 11, align: 'right' }, { t: 'Satz', w: 23, align: 'right' }, { t: 'Betrag €', w: 18, align: 'right' }],
@@ -327,10 +335,10 @@
     if (b.regel) rows.push(['Umsatzsteuer ' + fmt(st.ust * 100, 0) + ' %', eur(b.ust)]);
     rows.push(['Rechnungsbetrag', eur(b.brutto), { total: true }]);
     d.sumRows(rows);
-    if (!b.regel) d.para('Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmer).', { size: 9 });
+    d.para('Die Tätigkeit als Wildschadensschätzer wird ehrenamtlich ausgeübt. Es wird keine Umsatzsteuer berechnet.', { size: 9 });
     d.gap(10);
     d.para('Bitte überweisen Sie den Betrag innerhalb von 14 Tagen unter Angabe der Rechnungsnummer auf:', { size: 10 });
-    d.kv([['IBAN', st.iban], ['Bank', st.bank], ['Steuernummer', st.steuernr]], { labelW: 100 });
+    d.kv([['IBAN', st.iban], ['Bank', st.bank], ...(st.steuernr ? [['Steuernummer', st.steuernr]] : [])], { labelW: 100 });
     return d.finish();
   }
 

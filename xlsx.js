@@ -308,7 +308,7 @@
       const rc = f.rech;
       const sonst = rc.empf === 'Sonstiger' ? [rc.sonstName, rc.sonstAnschrift].filter(Boolean).join(', ') : '';
       for (const [lab, v, pre] of [['Empfänger:', rc.empf || ''], ['Nur bei „Sonstiger“', sonst, true], ['Rechnungs-Nr.', rc.nr || ''],
-        ['Rechnungsdatum', dateSerial(rc.datum) || ''], ['Umsatzsteuer', rc.ust || '']]) {
+        ['Rechnungsdatum', dateSerial(rc.datum) || '']]) {
         const p = re.find(lab, { prefix: !!pre }); if (!p) continue;
         const r = re.rightOf(p);
         if (re.set(r.row, r.col, v)) { if (v !== '') rep.written++; }
@@ -327,5 +327,87 @@
     return { blob, rep };
   }
 
-  global.XL = { Workbook, readStammdaten, exportFall, dateSerial, norm };
+
+  /* ---------- Rückweg: ausgefüllte Excel-Datei in einen Fall einlesen ---------- */
+  function isoFrom(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'number' && v > 20000 && v < 80000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000); return d.toISOString().slice(0, 10); }
+    const m = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/.exec(String(v).trim());
+    if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(v))) return String(v).slice(0, 10);
+    return '';
+  }
+  const str = v => v === null || v === undefined ? '' : String(v);
+  const dez = v => v === null || v === undefined || v === '' ? '' : String(Math.round(Number(v) * 10000) / 10000).replace('.', ',');
+  function readTable(sh, anchor, cols, max) {
+    const a = sh.find(anchor); if (!a) return [];
+    const cc = {}; for (const [h, k] of Object.entries(cols)) { const c = sh.colInRow(a.row, h); if (c) cc[k] = c; }
+    const lastCol = Math.max(0, ...Object.values(cc)); const out = [];
+    for (let r = a.row + 1; out.length < max && r < a.row + 200; r++) {
+      let stop = false;
+      for (let c = 1; c <= lastCol + 1; c++) { const t = norm(sh.text(r, c)); if (t && /^(summe|mittelwert|übertrag|tipp)/.test(t)) { stop = true; break; } }
+      if (stop) break;
+      const row = {}; let any = false;
+      for (const [k, c] of Object.entries(cc)) { row[k] = sh.hasFormula(r, c) ? null : sh.value(r, c); if (row[k] !== null && row[k] !== '') any = true; }
+      if (any) out.push(row);
+    }
+    return out;
+  }
+  async function importFall(buf) {
+    const wb = await Workbook.open(buf);
+    const f = {}; const info = { felder: 0 };
+    const fa = await wb.sheet('Fall');
+    if (!fa) throw new Error('Blatt „Fall“ fehlt – ist das eine Wildschaden-Datei?');
+    const get = (sh, lab, pre) => { const p = sh.find(lab, { prefix: !!pre }); if (!p) return null; const r = sh.rightOf(p); return sh.value(r.row, r.col); };
+    const map = [['az', 'Aktenzeichen'], ['verfahren', 'Verfahrensart'], ['stelle', 'Verfahrensführende Stelle', 1], ['stelleAnschrift', 'Ansprechpartner / Anschrift Stelle'],
+      ['gesch.name', 'Geschädigter (Name)'], ['gesch.anschrift', 'Anschrift Geschädigter'], ['ersatz.name', 'Ersatzpflichtiger (', 1], ['ersatz.anschrift', 'Anschrift Ersatzpflichtiger'],
+      ['jagdbezirk', 'Jagdbezirk'], ['zeuge1', 'Zeuge 1'], ['zeuge2', 'Zeuge 2'], ['vertreter', 'Vertreter Jagdvorstand'], ['gemarkung', 'Gemarkung'], ['flur', 'Flur'],
+      ['flurstueck', 'Flurstück(e)'], ['schlag', 'Schlagname (betrieblich)'], ['schlagHa', 'Schlaggröße (ha)', 0, 'num'], ['kultur', 'Kultur'], ['wildart', 'Wildart (Verursacher)'],
+      ['kenntnis', 'Datum Kenntnis vom Schaden', 0, 'date'], ['anmeldung', 'Datum Anmeldung bei Amt/Gemeinde', 0, 'date'], ['sbProz', 'Selbstbehalt in % des Schadens', 0, 'pct'],
+      ['sbEuro', 'Selbstbehalt in € (fester Betrag)', 0, 'num'], ['deckel', 'Höchstbetrag / Deckelung je Fall (€)', 0, 'num'], ['pauschale', 'Vereinbarte Wildschadenspauschale (€/Jahr)', 0, 'num'],
+      ['ustGesch', 'Besteuerung des Geschädigten'], ['bemerkung', 'Bemerkungen fürs Protokoll']];
+    for (const [k, lab, pre, t] of map) {
+      const v = get(fa, lab, pre);
+      const val = t === 'date' ? isoFrom(v) : t === 'num' ? dez(v) : t === 'pct' ? (v === null || v === '' ? '' : dez(Number(v) <= 1 ? Number(v) * 100 : v)) : str(v);
+      const ks = k.split('.'); if (ks.length === 2) { f[ks[0]] = f[ks[0]] || {}; f[ks[0]][ks[1]] = val; } else f[k] = val;
+      if (val !== '') info.felder++;
+    }
+    f.termine = readTable(fa, 'Art des Termins', { 'Datum': 'datum', 'Art des Termins': 'art', 'Anwesende': 'anwesende', 'Feststellungen': 'feststellungen' }, 50)
+      .map(t => ({ datum: isoFrom(t.datum), art: str(t.art), anwesende: str(t.anwesende), feststellungen: str(t.feststellungen) }));
+    const sc = await wb.sheet('Schadstellen');
+    f.stellen = sc ? readTable(sc, 'Länge m', { 'Länge m': 'l', 'Breite m': 'b', 'Verlust %': 'v', 'Grünland-Schadgrad': 'g', 'GPS Breite (N)': 'lat', 'GPS Länge (E)': 'lon',
+      'Foto-Nr.': 'foto', 'Ortstermin': 'termin', 'Bemerkung': 'bem' }, 100)
+      .filter(s => !/beispiel\s*–\s*überschreiben/i.test(str(s.bem)) && (s.l || s.b))
+      .map(s => ({ l: dez(s.l), b: dez(s.b), v: s.v === null || s.v === '' ? '' : dez(Number(s.v) <= 1 ? Number(s.v) * 100 : s.v), g: str(s.g), lat: s.lat == null ? '' : s.lat, lon: s.lon == null ? '' : s.lon,
+        foto: str(s.foto), termin: str(s.termin), bem: str(s.bem) })) : [];
+    const be = await wb.sheet('Berechnung');
+    f.ertrag = { methode: '', proben: [{}, {}, {}, {}, {}], betrieb: '', schaetzung: '', stroh: '' };
+    f.wieder = []; f.saat = [];
+    if (be) {
+      f.ertrag.methode = str(get(be, 'Ertragsermittlung (Methode)'));
+      f.ertrag.betrieb = dez(get(be, 'Betriebsdurchschnitt (t/ha)'));
+      f.ertrag.schaetzung = dez(get(be, 'Schätzung am Bestand', 1));
+      f.ertrag.stroh = dez(get(be, 'Strohertrag (t/ha)', 1));
+      const pr = readTable(be, 'Erntemenge kg', { 'Erntemenge kg': 'kg', 'Probefläche m²': 'm2' }, 5);
+      pr.forEach((p, i) => { f.ertrag.proben[i] = { kg: dez(p.kg), m2: dez(p.m2) }; });
+      f.wieder = readTable(be, 'Kostenquelle', { 'Arbeitsgang': 'gang', 'Kostenquelle': 'quelle', 'Fläche ha': 'ha', 'Eigener Satz €/ha': 'eigen', 'Lohnunternehmer €': 'lu' }, 8)
+        .filter(w => w.gang).map(w => ({ gang: str(w.gang), quelle: str(w.quelle), ha: dez(w.ha), eigen: dez(w.eigen), lu: dez(w.lu) }));
+      f.saat = readTable(be, 'Pauschal €/ha', { 'Saatgut': 'sorte', 'Methode': 'methode', 'Fläche ha': 'ha', 'Pauschal €/ha': 'pauschal', 'Rechnung €': 'rechnung' }, 3)
+        .filter(s => s.sorte).map(s => ({ sorte: str(s.sorte), methode: str(s.methode), ha: dez(s.ha), pauschal: dez(s.pauschal), rechnung: dez(s.rechnung) }));
+    }
+    const ze = await wb.sheet('Zeiterfassung');
+    f.zeiten = ze ? readTable(ze, 'Tätigkeit', { 'Datum': 'datum', 'Tätigkeit': 'taet', 'Beschreibung': 'beschr', 'Stunden': 'std', 'km': 'km' }, 50)
+      .filter(z => z.std || z.km).map(z => ({ datum: isoFrom(z.datum), taetigkeit: str(z.taet), beschr: str(z.beschr), stunden: dez(z.std), km: dez(z.km) })) : [];
+    const re = await wb.sheet('Rechnung');
+    f.rech = { empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' };
+    if (re) {
+      f.rech.empf = str(get(re, 'Empfänger:'));
+      const so = str(get(re, 'Nur bei „Sonstiger“', 1)); if (so) { const [a, ...b] = so.split(','); f.rech.sonstName = a.trim(); f.rech.sonstAnschrift = b.join(',').trim(); }
+      f.rech.nr = str(get(re, 'Rechnungs-Nr.')); f.rech.datum = isoFrom(get(re, 'Rechnungsdatum'));
+    }
+    info.stellen = f.stellen.length; info.termine = f.termine.length; info.zeiten = f.zeiten.length;
+    return { f, info };
+  }
+
+  global.XL = { Workbook, readStammdaten, exportFall, importFall, dateSerial, norm };
 })(typeof window !== 'undefined' ? window : globalThis);

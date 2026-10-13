@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
@@ -113,12 +113,12 @@ function newFall() {
     termine: [], stellen: [newStelle()],
     ertrag: { methode: '', proben: [{}, {}, {}, {}, {}], betrieb: '', schaetzung: '', stroh: '' },
     wieder: [], saat: [], zeiten: [], fotoSeq: 0,
-    prot: { ort: '', datum: '', fotos: true }, sigs: [], rech: { empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' }
+    prot: { ort: '', datum: '', fotos: true, karte: true }, sigs: [], rech: { empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' }
   };
 }
 /* ältere Fälle (Stufe 1) um neue Felder ergänzen */
 function normFall(f) {
-  f.prot = Object.assign({ ort: '', datum: '', fotos: true }, f.prot || {});
+  f.prot = Object.assign({ ort: '', datum: '', fotos: true, karte: true }, f.prot || {});
   f.sigs = f.sigs || [];
   f.rech = Object.assign({ empf: '', sonstName: '', sonstAnschrift: '', nr: '', datum: '', ust: '' }, f.rech || {});
   return f;
@@ -254,6 +254,8 @@ function vList() {
   return `
   <label><input type="search" id="search" placeholder="Suchen: Name, Flurstück, Az …" value="${esc(view.q || '')}"></label>
   <div class="seg">${[['', 'Alle (' + faelle.length + ')'], ...L.status.map(s => [s, s[0].toUpperCase() + s.slice(1) + ' (' + cnt(s) + ')'])].map(([k, t]) => `<button data-act="filter" data-v="${k}" class="${(view.st || '') === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+  ${faelle.length && (!S.lastBackupTs || Date.now() - S.lastBackupTs > 7 * 86400000) ? `<div class="note warn">${S.lastBackupTs ? 'Letzte Datensicherung ist über eine Woche her.' : 'Noch keine Datensicherung gemacht.'} <button class="btn sm" data-act="goBackup">💾 Jetzt sichern</button></div>` : ''}
+  <div class="btns" style="margin:0 0 10px"><label class="btn sm" style="margin:0">📥 Excel-Datei einlesen<input type="file" id="impIn" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label></div>
   ${S.vorlageName ? '' : `<div class="note warn">Noch keine Excel-Vorlage geladen. Erfassen geht trotzdem – für den Export einmal unter ⚙ Einstellungen die Vorlage laden.</div>`}
   <div class="list">${list.map(f => {
     const r = calc(f); const fr = fristInfo(f)[0] === 'bad';
@@ -323,7 +325,8 @@ function vStellen() {
       <div><div class="muted">Stellen</div><div class="big" data-live="anz">${r.anzahl}</div></div>
       <div><div class="muted">Fläche m²</div><div class="big" data-live="fl">${fmt(r.flaeche, 1)}</div></div>
       <div><div class="muted">wirksam m²</div><div class="big" data-live="eff">${fmt(r.eff, 1)}</div></div></div>
-    <p class="muted" style="margin:6px 0 0">Leeres Verlust-Feld = 100 %. Die Excel-Vorlage nimmt bis zu 30 Stellen auf.</p></div>
+    <p class="muted" style="margin:6px 0 0">Leeres Verlust-Feld = 100 %. Die Excel-Vorlage nimmt bis zu 30 Stellen auf.</p>
+    <div class="btns"><button class="btn" data-act="map">🗺 Lageplan anzeigen</button></div></div>
   ${cur.stellen.map((s, i) => {
     const k = 'stellen.' + i;
     return `<div class="card" id="st-${s.id}">
@@ -448,9 +451,9 @@ function vExport() {
     ${fr[0] === 'bad' ? `<div class="note bad">${esc(fr[1])}</div>` : ''}</div>
 ${vPdf(r)}
   <div class="card"><h2>Excel-Datei erzeugen</h2>
-    ${S.vorlageName ? `<p class="muted" style="margin-top:0">Vorlage: <b>${esc(S.vorlageName)}</b> (geladen ${esc(S.vorlageDatum || '')})</p>` : `<div class="note warn">Noch keine Vorlage geladen. Unter ⚙ Einstellungen einmal deine Excel-Vorlage auswählen.</div>`}
+    ${cur.srcName ? `<p class="muted" style="margin-top:0">Basis: deine eingelesene Datei <b>${esc(cur.srcName)}</b> – was du dort am PC eingetragen hast, bleibt erhalten.</p>` : S.vorlageName ? `<p class="muted" style="margin-top:0">Vorlage: <b>${esc(S.vorlageName)}</b> (geladen ${esc(S.vorlageDatum || '')})</p>` : `<div class="note warn">Noch keine Vorlage geladen. Unter ⚙ Einstellungen einmal deine Excel-Vorlage auswählen.</div>`}
     ${warn.length ? `<div class="note warn">Hinweis: ${warn.map(esc).join(' · ')}</div>` : ''}
-    <button class="btn pri wide" data-act="export" ${S.vorlageName ? '' : 'disabled'}>📄 Excel aus Vorlage erzeugen</button>
+    <button class="btn pri wide" data-act="export" ${S.vorlageName || cur.srcName ? '' : 'disabled'}>📄 Excel aus Vorlage erzeugen</button>
     <div id="expOut"></div></div>
   <div class="card"><h2>Fotos</h2><p class="muted" style="margin-top:0">Alle Fotos dieses Falls als ZIP. Dateinamen enthalten Foto-Nr. und Schadstelle, passend zur Spalte „Foto-Nr.“ in Excel.</p>
     <button class="btn wide" data-act="fotozip">🗂 Fotos als ZIP</button><div id="zipOut"></div></div>`;
@@ -473,8 +476,7 @@ function rechBetraege(f) {
   const roh = Object.values(tage).reduce((a, h) => a + h * st.stundensatz, 0);
   const ged = Object.values(tage).reduce((a, h) => a + Math.min(h * st.stundensatz, st.tagesmax), 0);
   const fahrt = km * st.kmgeld, netto = ged + fahrt;
-  const regel = (f.rech.ust || st.ustModus || '').startsWith('Regel');
-  const ust = regel ? Math.round(netto * st.ust * 100) / 100 : 0;
+  const regel = false, ust = 0; // Ehrenamt: keine Umsatzsteuer
   return { honorarRoh: roh, kuerzung: roh - ged, km, fahrt, netto, regel, ust, brutto: netto + ust };
 }
 function empfaenger(f) {
@@ -491,6 +493,7 @@ function vPdf(r) {
     ${S.signatur ? '' : `<div class="note warn">Deine Unterschrift fehlt noch. <button class="btn sm" data-act="sigOwn">✍ Jetzt unterschreiben</button></div>`}
     <div class="row">${F('Ort', 'prot.ort', { ph: 'z. B. Lieskau' })}${F('Datum', 'prot.datum', { type: 'date' })}</div>
     <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" data-chk="prot.fotos" ${p.fotos ? 'checked' : ''} style="width:24px;min-height:24px"> <span style="margin:0;color:var(--ink)">Fotos als Anlage anhängen</span></label>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" data-chk="prot.karte" ${p.karte ? 'checked' : ''} style="width:24px;min-height:24px"> <span style="margin:0;color:var(--ink)">Lageplan der Schadstellen einfügen (Karte braucht Internet)</span></label>
     <h3 style="margin-top:14px">Unterschriften der Beteiligten <span class="muted" style="font-weight:400">(freiwillig)</span></h3>
     ${sigs.map((g, i) => `<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
       <div class="row">${Sel('Rolle', 'sigs.' + i + '.rolle', L.sigRolle)}${F('Name', 'sigs.' + i + '.name')}</div>
@@ -504,12 +507,11 @@ function vPdf(r) {
     ${Sel('Empfänger', 'rech.empf', L.empfaenger, { re: 1 })}
     ${rc.empf === 'Sonstiger' ? F('Name', 'rech.sonstName') + F('Anschrift', 'rech.sonstAnschrift') : `<p class="muted" style="margin-top:-4px">${esc([emp.name, emp.anschrift].filter(Boolean).join(', ') || 'Name/Anschrift beim Fall eintragen')}</p>`}
     <div class="row">${F('Rechnungs-Nr.', 'rech.nr', { ph: S.naechsteNr || nextRechNr() })}${F('Rechnungsdatum', 'rech.datum', { type: 'date' })}</div>
-    ${Sel('Umsatzsteuer', 'rech.ust', L.ustRechnung, { re: 1 })}
+    <p class="muted">Ehrenamtliche Tätigkeit – die Rechnung weist keine Umsatzsteuer aus.</p>
     <div class="sum"><span>Honorar ${fmt(r.std)} h${b.kuerzung > 0.004 ? ' (gedeckelt)' : ''}</span><span class="num">${eur(b.honorarRoh - b.kuerzung)}</span></div>
     <div class="sum"><span>Fahrtkosten ${fmt(b.km, 0)} km</span><span class="num">${eur(b.fahrt)}</span></div>
     ${b.regel ? `<div class="sum"><span>USt ${fmt(S.stamm.ust * 100, 0)} %</span><span class="num">${eur(b.ust)}</span></div>` : ''}
     <div class="sum total"><span>Rechnungsbetrag</span><span class="num">${eur(b.brutto)}</span></div>
-    ${!S.stamm.steuernr ? '<div class="note warn">Steuernummer fehlt – unter ⚙ Einstellungen eintragen.</div>' : ''}
     <div style="margin-top:10px"><button class="btn pri wide" data-act="rechPdf" ${rechZeiten(cur).length ? '' : 'disabled'}>🧾 Rechnung als PDF</button></div>
     ${rechZeiten(cur).length ? '' : '<p class="muted">Erst unter „Zeiten“ Stunden eintragen.</p>'}
     <div id="rechOut"></div></div>`;
@@ -573,12 +575,19 @@ async function pdfCtx(f, withFotos) {
       gps: s.lat && s.lon ? num(s.lat).toFixed(5) + ' N, ' + num(s.lon).toFixed(5) + ' E' : '', fotos: await fotoNrText(s), bem: s.bem || '' });
   }
   const fotos = [];
-  if (withFotos) for (const p of fotosAll) fotos.push({ nr: p.nr, stelle: idx[p.stelleId] || '?', bytes: new Uint8Array(await p.blob.arrayBuffer()),
+  if (withFotos === true) for (const p of fotosAll) fotos.push({ nr: p.nr, stelle: idx[p.stelleId] || '?', bytes: new Uint8Array(await p.blob.arrayBuffer()),
     zeit: new Date(p.time).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }), gps: p.lat ? p.lat.toFixed(5) + ' N, ' + p.lon.toFixed(5) + ' E' : '' });
   const z = rechZeiten(f);
   const ds = z.map(x => x.datum).filter(Boolean);
+  let map = null;
+  if (withFotos !== false && f.prot.karte && window.WSMAP) {
+    try {
+      const m = await WSMAP.render(mapStellen(f), 1100, 680);
+      if (m) map = { bytes: dataUrlToBytes(m.canvas.toDataURL('image/jpeg', 0.85)), online: m.online, count: m.count };
+    } catch (e) { console.warn('Lageplan', e); }
+  }
   return {
-    r, stellen, fotos, num, frist: fristInfo, grad: GRAD_MASSNAHME, zeiten: z, betraege: rechBetraege(f), empfaenger,
+    r, stellen, fotos, map, num, frist: fristInfo, grad: GRAD_MASSNAHME, zeiten: z, betraege: rechBetraege(f), empfaenger,
     zeitraum: ds.length ? (ds[0] === ds[ds.length - 1] ? dDE(ds[0]) : dDE(ds[0]) + ' – ' + dDE(ds[ds.length - 1])) : '',
     wSatz: w => { const q = w.quelle || 'KTBL/MR-Satz'; if (q === 'Lohnunternehmer') return 'laut Rechnung'; if (q === 'Eigene Kosten') return fmt(num(w.eigen)) + ' €/ha'; const k = S.ktbl.find(x => x.gang === w.gang); return k && k.satz != null ? fmt(k.satz) + ' €/ha' : '–'; },
     sSatz: s => { const m = s.methode || 'kg/ha × Preis'; if (m === 'Laut Rechnung') return 'laut Rechnung'; if (m === 'Pauschal €/ha') return fmt(num(s.pauschal)) + ' €/ha'; const g = S.saatgut.find(x => x.sorte === s.sorte); return g ? fmt(g.kgha, 0) + ' kg/ha × ' + fmt(g.preis) + ' €/kg' : '–'; }
@@ -590,14 +599,13 @@ async function makePdf(kind) {
   try {
     if (kind === 'prot') {
       if (!cur.prot.datum) cur.prot.datum = today();
-      const ctx = await pdfCtx(cur, cur.prot.fotos);
+      const ctx = await pdfCtx(cur, cur.prot.fotos ? true : 'ohneFotos');
       const bytes = await PDFX.protokoll(cur, S, ctx.r, ctx);
       lastExport = { blob: new Blob([bytes], { type: 'application/pdf' }), name: 'Schaetzprotokoll_' + fileSafe(cur.az) + '.pdf' };
       if (cur.status === 'offen') cur.status = 'geschätzt';
     } else {
       if (!cur.rech.nr) { cur.rech.nr = S.naechsteNr || nextRechNr(); S.naechsteNr = incNr(cur.rech.nr); await saveSettings(); }
       if (!cur.rech.datum) cur.rech.datum = today();
-      if (!cur.rech.ust) cur.rech.ust = S.stamm.ustModus;
       const ctx = await pdfCtx(cur, false);
       const bytes = await PDFX.rechnung(cur, S, ctx);
       lastExport = { blob: new Blob([bytes], { type: 'application/pdf' }), name: 'Rechnung_' + fileSafe(cur.rech.nr) + '_' + fileSafe(cur.az) + '.pdf' };
@@ -608,6 +616,21 @@ async function makePdf(kind) {
       <div class="btns">${canShare(lastExport.blob, lastExport.name) ? '<button class="btn pri" data-act="shareX">📤 Teilen</button>' : ''}<button class="btn" data-act="openX">👁 Ansehen</button><button class="btn" data-act="dlX">⬇ Speichern</button></div>`;
     o.scrollIntoView({ block: 'nearest' });
   } catch (e) { out.innerHTML = `<div class="note bad">Fehler beim PDF: ${esc(e.message)}</div>`; console.error(e); }
+}
+function mapStellen(f) { return f.stellen.map((s, i) => ({ nr: i + 1, lat: s.lat, lon: s.lon, poly: s.poly || [] })); }
+function dataUrlToBytes(u) { const b = atob(u.split(',')[1]); const a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+let mapZoom = 0;
+async function showMap(delta) {
+  if (delta === 0) mapZoom = 0; else mapZoom += delta;
+  if (!$('#dlg').open || !$('#mapBox')) openDlg('Lageplan', `<div id="mapBox" style="min-height:200px"><p class="muted">Lade Karte …</p></div>
+    <div class="btns"><button class="btn" data-act="mapZ" data-v="-1">− weiter weg</button><button class="btn" data-act="mapZ" data-v="1">＋ näher ran</button></div>
+    <p class="muted">Rote Nummern = Schadstellen, rote Flächen = GPS-Umgänge. Ohne Internet erscheinen nur die Punkte.</p>`);
+  const w = Math.min(1000, Math.round($('#dlgB').clientWidth * (window.devicePixelRatio || 1)));
+  const m = await WSMAP.render(mapStellen(cur), w, Math.round(w * 0.75), { zoomDelta: mapZoom, scale: w / Math.max(1, $('#dlgB').clientWidth - 28) });
+  const box = $('#mapBox'); if (!box) return;
+  if (!m) { box.innerHTML = '<div class="note warn">Noch keine Schadstelle mit GPS-Position. Bei einer Schadstelle „📍 Position übernehmen“ tippen.</div>'; return; }
+  m.canvas.style.cssText = 'width:100%;border-radius:10px;display:block';
+  box.innerHTML = ''; box.appendChild(m.canvas);
 }
 function incNr(n) { const m = /^(.*?)(\d+)$/.exec(n); return m ? m[1] + String(+m[2] + 1).padStart(m[2].length, '0') : n; }
 
@@ -624,9 +647,9 @@ function vSettings() {
     <p class="muted">Tipp: Handy quer halten, dann hast du mehr Platz.</p></div>
   <div class="card"><h2>Stammdaten für Protokoll und Rechnung</h2>
     <p class="muted" style="margin-top:0">${esc(S.quelle || '')}</p>
-    ${[['Name', 'name'], ['Straße, Nr.', 'strasse'], ['PLZ, Ort', 'ort'], ['Telefon', 'telefon'], ['E-Mail', 'email'], ['Bestellt durch (Landkreis/Amt)', 'bestellt'], ['Steuernummer', 'steuernr'], ['IBAN', 'iban'], ['Bank', 'bank']]
+    ${[['Name', 'name'], ['Straße, Nr.', 'strasse'], ['PLZ, Ort', 'ort'], ['Telefon', 'telefon'], ['E-Mail', 'email'], ['Bestellt durch (Landkreis/Amt)', 'bestellt'], ['Steuernummer (freiwillig)', 'steuernr'], ['IBAN', 'iban'], ['Bank', 'bank']]
       .map(([l, k]) => `<label><span>${l}</span><input data-s="${k}" value="${esc(st[k] || '')}"></label>`).join('')}
-    <label><span>Umsatzsteuer auf deinen Rechnungen</span><select data-s="ustModus">${L.ustRechnung.map(x => `<option${x === st.ustModus ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+    <p class="muted">Rechnungen ohne Umsatzsteuer (Ehrenamt).</p>
     <label><span>Nächste Rechnungsnummer</span><input data-s="naechsteNr" value="${esc(S.naechsteNr || nextRechNr())}"></label>
     <div class="sum"><span>Stundensatz</span><span class="num">${eur(st.stundensatz)}/h</span></div>
     <div class="sum"><span>Höchstbetrag je Kalendertag</span><span class="num">${eur(st.tagesmax)}</span></div>
@@ -643,7 +666,7 @@ function vSettings() {
     <div class="btns"><button class="btn pri" data-act="backup">💾 Sicherung erstellen</button>
     <label class="btn" style="margin:0">↩ Sicherung einlesen<input type="file" id="restoreIn" accept=".zip,application/zip" class="hidden"></label></div><div id="bkOut"></div>
     ${S.lastBackup ? `<p class="muted">Letzte Sicherung: ${esc(S.lastBackup)}</p>` : ''}</div>
-  <p class="muted" style="text-align:center">Wildschaden Feld · Version ${APP_VERSION} · Stufe 2</p>`;
+  <p class="muted" style="text-align:center">Wildschaden Feld · Version ${APP_VERSION} · Stufe 3</p>`;
 }
 
 /* ---------- Live-Werte aktualisieren, ohne neu zu zeichnen ---------- */
@@ -759,7 +782,7 @@ async function stellenRows() {
 async function doExport() {
   const out = $('#expOut'); out.innerHTML = '<p class="muted">Erzeuge Datei …</p>';
   try {
-    const tpl = await DB.get('kv', 'vorlage');
+    const tpl = (cur.srcName && await DB.get('kv', 'src-' + cur.id)) || await DB.get('kv', 'vorlage');
     if (!tpl) throw new Error('Vorlage nicht gefunden – bitte neu laden.');
     const { blob, rep } = await XL.exportFall(await tpl.arrayBuffer(), cur, { stellenRows: await stellenRows(), stamm: S.stamm });
     const name = 'WS_' + [fileSafe(cur.az), fileSafe(cur.gesch.name), fileSafe(cur.flurstueck && 'Fl' + cur.flurstueck)].filter(Boolean).join('_') + '.xlsx';
@@ -799,6 +822,30 @@ async function fotoZip() {
   out.innerHTML = `<div class="note ok">${fotos.length} Fotos gepackt.</div><div class="btns">${canShare(blob, name) ? '<button class="btn pri" data-act="shareX">📤 Teilen</button>' : ''}<button class="btn" data-act="dlX">⬇ Speichern</button></div>`;
 }
 
+/* ---------- Excel-Datei einlesen (am PC begonnen, am Feld weitermachen) ---------- */
+async function importExcel(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const { f: x, info } = await XL.importFall(buf);
+    if (x.az && faelle.some(f => f.az === x.az) && !confirm('Es gibt schon einen Fall „' + x.az + '“. Trotzdem als neuen Fall anlegen?')) return;
+    const f = newFall();
+    for (const k of ['az', 'verfahren', 'stelle', 'stelleAnschrift', 'jagdbezirk', 'zeuge1', 'zeuge2', 'vertreter', 'gemarkung', 'flur', 'flurstueck', 'schlag', 'schlagHa',
+      'kultur', 'wildart', 'kenntnis', 'anmeldung', 'sbProz', 'sbEuro', 'deckel', 'pauschale', 'ustGesch', 'bemerkung']) if (x[k]) f[k] = x[k];
+    Object.assign(f.gesch, x.gesch || {}); Object.assign(f.ersatz, x.ersatz || {});
+    f.termine = x.termine.map(t => ({ id: uid(), ...t }));
+    if (x.stellen.length) f.stellen = x.stellen.map(s => Object.assign(newStelle(), { laenge: s.l, breite: s.b, verlust: s.v, grad: s.g,
+      lat: s.lat === '' ? '' : s.lat, lon: s.lon === '' ? '' : s.lon, termin: s.termin, bem: [s.bem, s.foto && 'Fotos laut Excel: ' + s.foto].filter(Boolean).join(' · ') }));
+    f.ertrag = x.ertrag; f.wieder = x.wieder; f.saat = x.saat;
+    f.zeiten = x.zeiten.map(z => ({ id: uid(), ...z }));
+    Object.assign(f.rech, x.rech);
+    f.srcName = file.name;
+    await DB.put('kv', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'src-' + f.id);
+    faelle.push(f); await DB.put('faelle', f);
+    cur = f; view = { name: 'fall', tab: 'fall' }; render(); window.scrollTo(0, 0);
+    toast('Eingelesen: ' + info.felder + ' Felder, ' + info.stellen + ' Schadstellen, ' + info.termine + ' Termine, ' + info.zeiten + ' Zeiten', 4500);
+  } catch (e) { toast('Datei konnte nicht gelesen werden: ' + e.message, 5000); }
+}
+
 /* ---------- Vorlage & Sicherung ---------- */
 async function loadTemplate(file) {
   const out = $('#tplOut'); out.innerHTML = '<p class="muted">Prüfe Vorlage …</p>';
@@ -830,11 +877,12 @@ async function backup() {
   z.file('daten.json', JSON.stringify({ version: APP_VERSION, erstellt: new Date().toISOString(), faelle, kontakte, settings: S,
     fotos: fotos.map(({ blob, ...m }) => m) }));
   fotos.forEach(f => z.file('fotos/' + f.id + '.jpg', f.blob));
+  for (const f of faelle) if (f.srcName) { const b = await DB.get('kv', 'src-' + f.id); if (b) z.file('quellen/' + f.id + '.xlsx', b); }
   const tpl = await DB.get('kv', 'vorlage'); if (tpl) z.file('vorlage.xlsx', tpl);
   const blob = await z.generateAsync({ type: 'blob', mimeType: 'application/zip' });
   const name = 'Wildschaden_Sicherung_' + today() + '.zip';
   lastExport = { blob, name };
-  S.lastBackup = new Date().toLocaleString('de-DE'); await saveSettings();
+  S.lastBackup = new Date().toLocaleString('de-DE'); S.lastBackupTs = Date.now(); await saveSettings();
   $('#bkOut').innerHTML = `<div class="note ok">${faelle.length} Fälle, ${fotos.length} Fotos gesichert.</div><div class="btns">${canShare(blob, name) ? '<button class="btn pri" data-act="shareX">📤 Teilen</button>' : ''}<button class="btn" data-act="dlX">⬇ Speichern</button></div>`;
 }
 async function restore(file) {
@@ -844,6 +892,7 @@ async function restore(file) {
     if (!confirm('Sicherung vom ' + new Date(d.erstellt).toLocaleString('de-DE') + ' mit ' + d.faelle.length + ' Fällen einlesen? Fälle mit gleicher Kennung werden überschrieben, andere bleiben erhalten.')) return;
     for (const f of d.faelle) await DB.put('faelle', f);
     for (const c of d.kontakte || []) await DB.put('kontakte', c);
+    for (const zf of z.file(/^quellen\/.+\.xlsx$/)) await DB.put('kv', new Blob([await zf.async('arraybuffer')]), 'src-' + zf.name.slice(8, -5));
     for (const m of d.fotos || []) { const zf = z.file('fotos/' + m.id + '.jpg'); if (zf) await DB.put('fotos', { ...m, blob: new Blob([await zf.async('arraybuffer')], { type: 'image/jpeg' }) }); }
     const t = z.file('vorlage.xlsx');
     if (t && d.settings) { await DB.put('kv', new Blob([await t.async('arraybuffer')]), 'vorlage'); S = Object.assign({}, DEFAULT_SETTINGS, d.settings); await saveSettings(); }
@@ -864,6 +913,7 @@ document.addEventListener('change', async e => {
   if (t.dataset.photo !== undefined && t.files.length) { await addPhotos(+t.dataset.photo, [...t.files]); t.value = ''; }
   if (t.id === 'tplIn' && t.files[0]) loadTemplate(t.files[0]);
   if (t.id === 'restoreIn' && t.files[0]) restore(t.files[0]);
+  if (t.id === 'impIn' && t.files[0]) { importExcel(t.files[0]); t.value = ''; }
   if (t.dataset.chk && cur) { setPath(cur, t.dataset.chk, t.checked); save(); }
 });
 document.addEventListener('click', async e => {
@@ -878,7 +928,7 @@ document.addEventListener('click', async e => {
     case 'delFall':
       if (!confirm('Fall „' + (cur.az || '') + '“ mit allen Fotos endgültig löschen?')) break;
       for (const f of await DB.byIndex('fotos', 'fallId', cur.id)) await DB.del('fotos', f.id);
-      await DB.del('faelle', cur.id); faelle = faelle.filter(f => f.id !== cur.id); cur = null; view = { name: 'list' }; render(); break;
+      await DB.del('faelle', cur.id); DB.del('kv', 'src-' + cur.id).catch(() => {}); faelle = faelle.filter(f => f.id !== cur.id); cur = null; view = { name: 'list' }; render(); break;
     case 'addTermin': cur.termine.push({ id: uid(), datum: today(), art: '', anwesende: '', feststellungen: '' }); save(); render(); break;
     case 'delTermin': if (confirm('Termin entfernen?')) { cur.termine.splice(i, 1); save(); render(); } break;
     case 'anwesend': {
@@ -949,6 +999,9 @@ document.addEventListener('click', async e => {
       if (png) { g.png = png; g.zeit = Date.now(); save(); render(); } break;
     }
     case 'protPdf': makePdf('prot'); break;
+    case 'map': showMap(0); break;
+    case 'goBackup': view = { name: 'settings', prevTab: view.tab, q: view.q, st: view.st }; render(); setTimeout(() => { const b = document.querySelector('[data-act="backup"]'); if (b) b.scrollIntoView({ block: 'center' }); }, 50); break;
+    case 'mapZ': showMap(+b.dataset.v); break;
     case 'rechPdf': makePdf('rech'); break;
     case 'openX': { const u = URL.createObjectURL(lastExport.blob); window.open(u, '_blank'); setTimeout(() => URL.revokeObjectURL(u), 60000); break; }
   }
