@@ -1,0 +1,67 @@
+WILDSCHADEN FELD – App aufs Handy bringen (einmalig, ca. 15 Minuten am PC)
+
+Die App braucht einmal eine Internetadresse, von der dein Handy sie installiert.
+Danach läuft sie komplett offline. Wir nehmen dafür GitHub Pages. Das kostet nichts.
+
+1. KONTO ANLEGEN
+   Am PC github.com öffnen, „Sign up“, Konto mit deiner E-Mail anlegen.
+   Den Benutzernamen merken, z. B. czaunig.
+
+2. ABLAGE ANLEGEN
+   Oben rechts „+“ → „New repository“.
+   Name: wildschaden
+   „Public“ auswählen. „Create repository“ klicken.
+
+3. DATEIEN HOCHLADEN
+   Diese ZIP-Datei auf dem PC entpacken.
+   In GitHub auf „uploading an existing file“ klicken.
+   ALLE Dateien aus dem entpackten Ordner ins Fenster ziehen
+   (index.html, app.js, xlsx.js, jszip.min.js, sw.js, manifest.webmanifest, die drei Icons).
+   Unten „Commit changes“ klicken.
+
+4. SEITE EINSCHALTEN
+   Im Repository auf „Settings“ → links „Pages“.
+   Bei „Branch“ „main“ auswählen, „/ (root)“, „Save“.
+   Nach 1–2 Minuten steht oben die Adresse, z. B.
+   https://czaunig.github.io/wildschaden/
+
+5. AUFS HANDY INSTALLIEREN
+   Die Adresse auf dem Samsung in CHROME öffnen (nicht im Samsung-Internet).
+   Menü ⋮ → „App installieren“ (oder „Zum Startbildschirm hinzufügen“ → „Installieren“).
+   Jetzt liegt „Wildschaden“ bei deinen Apps. Einmal öffnen, solange Internet da ist.
+   Ab dann geht alles offline.
+
+6. VORLAGE IN DIE APP LADEN
+   Deine Excel-Datei „…_Vorlage_unterschrieben.xlsx“ aufs Handy kopieren
+   (per Mail an dich selbst, Google Drive oder USB-Kabel).
+   In der App ⚙ → „Vorlage auswählen“ → Datei wählen.
+   Die App zeigt dir, welche Felder sie gefunden hat. Steht dort „Alle Eingabefelder gefunden“, passt alles.
+   Preise oder Sätze geändert? Vorlage am PC ändern und hier einfach neu laden.
+
+IM ALLTAG
+• Neuer Fall: unten rechts „＋ Neuer Fall“.
+• Ergebnis & Export → „Excel aus Vorlage erzeugen“ → Teilen (Mail, WhatsApp, Drive) oder Speichern (landet in „Downloads“).
+• Die Excel-Datei am PC öffnen. Excel rechnet alles neu, Protokoll und Rechnung stehen wie gewohnt bereit.
+• Fotos: unter Ergebnis & Export „Fotos als ZIP“. Die Nummern passen zur Spalte „Foto-Nr.“.
+• SICHERUNG: ⚙ → „Sicherung erstellen“ und die Datei auf den PC legen. Am besten jede Woche.
+  Wer in Chrome die Websitedaten löscht, löscht sonst auch die Fälle.
+
+UPDATE EINER NEUEN APP-VERSION
+Neue Dateien in GitHub über „Add file“ → „Upload files“ hochladen (alte werden ersetzt).
+Die App holt sich das Update beim nächsten Öffnen mit Internet. Deine Fälle bleiben erhalten.
+
+NEU IN VERSION 1.1 (STUFE 2)
+• ⚙ Einstellungen → „Meine Unterschrift“: einmal mit dem Finger unterschreiben (Handy quer halten).
+  Dort auch Steuernummer, Bank und „Bestellt durch“ eintragen.
+• Ergebnis & Export → „Schätzprotokoll als PDF“: Protokoll, Berechnungsanhang und Fotoanlage in einer Datei.
+  Beteiligte können vorher auf dem Handy unterschreiben („＋ Beteiligten unterschreiben lassen“).
+• Ergebnis & Export → „Rechnung als PDF“: getrennt vom Protokoll, mit Tagesdeckel und Fahrtkosten.
+  Die Rechnungsnummer zählt automatisch hoch (2026-001, 2026-002 …). Ohne Umsatzsteuer (Ehrenamt).
+
+NEU IN VERSION 1.2 (STUFE 3)
+• Schadstellen → „Lageplan anzeigen“: Karte mit allen Schadstellen (Nummern) und GPS-Umgängen (rote Flächen).
+  Mit Internet auf OpenStreetMap, ohne Internet nur die Punkte mit Maßstab.
+• Das Schätzprotokoll enthält den Lageplan im Anhang (abschaltbar).
+• Fallliste → „Excel-Datei einlesen“: Eine am PC ausgefüllte Vorlage wird zum Fall in der App.
+  Beim Export schreibt die App in genau diese Datei zurück – deine Einträge vom PC bleiben erhalten.
+• Die Fallliste erinnert dich, wenn die letzte Datensicherung länger als eine Woche her ist.
