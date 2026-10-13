@@ -1,7 +1,7 @@
 /* Offline-Speicher der App.
    Mit Internet: immer die neueste Fassung von GitHub holen (und für offline merken).
    Ohne Internet oder bei schwachem Netz (nach 4 Sekunden): gespeicherte Fassung nehmen. */
-const VERSION = 'ws-feld-1.2.1';
+const VERSION = 'ws-feld-1.2.2';
 const FILES = ['./', 'index.html', 'app.js', 'xlsx.js', 'jszip.min.js', 'pdf-lib.min.js', 'pdf.js', 'map.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));

@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.2.2';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
@@ -580,6 +580,7 @@ async function pdfCtx(f, withFotos) {
   const z = rechZeiten(f);
   const ds = z.map(x => x.datum).filter(Boolean);
   let map = null;
+  if (withFotos !== false && f.prot.karte) await needMap().catch(() => {});
   if (withFotos !== false && f.prot.karte && window.WSMAP) {
     try {
       const m = await WSMAP.render(mapStellen(f), 1100, 680);
@@ -620,7 +621,12 @@ async function makePdf(kind) {
 function mapStellen(f) { return f.stellen.map((s, i) => ({ nr: i + 1, lat: s.lat, lon: s.lon, poly: s.poly || [] })); }
 function dataUrlToBytes(u) { const b = atob(u.split(',')[1]); const a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
 let mapZoom = 0;
+function needMap() {
+  if (window.WSMAP) return Promise.resolve();
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'map.js'; sc.onload = res; sc.onerror = () => rej(new Error('Kartenmodul fehlt')); document.head.appendChild(sc); });
+}
 async function showMap(delta) {
+  await needMap();
   if (delta === 0) mapZoom = 0; else mapZoom += delta;
   if (!$('#dlg').open || !$('#mapBox')) openDlg('Lageplan', `<div id="mapBox" style="min-height:200px"><p class="muted">Lade Karte …</p></div>
     <div class="btns"><button class="btn" data-act="mapZ" data-v="-1">− weiter weg</button><button class="btn" data-act="mapZ" data-v="1">＋ näher ran</button></div>
