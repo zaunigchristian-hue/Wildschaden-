@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.2.2';
+const APP_VERSION = '1.3.0';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
@@ -225,6 +225,32 @@ function Sel(label, k, opts, o = {}) {
   return `<label><span>${esc(label)}</span><select data-k="${k}"${o.re ? ' data-re="1"' : ''}><option value="">– wählen –</option>${list.map(x => `<option${x === v ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
 }
 
+/* ---------- Übernahme aus Jarvis (nur eingefügter Text, keine Verbindung nach außen) ---------- */
+function jarvisParse(txt) {
+  const lines = String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length || !/^JARVIS-WILDSCHADEN/i.test(lines[0])) return null;
+  const v = {};
+  for (const l of lines.slice(1)) { const m = /^([^:]{1,30}):\s*(.*)$/.exec(l); if (m) v[m[1].trim().toLowerCase()] = m[2].trim(); }
+  const pick = (list, val) => { // nur eindeutige Treffer übernehmen, sonst in die Bemerkung
+    if (!val) return ''; const x = val.toLowerCase().trim();
+    const ex = list.find(o => o.toLowerCase() === x); if (ex) return ex;
+    const hit = list.filter(o => { const y = o.toLowerCase(); return y.includes(x) || x.includes(y); });
+    return hit.length === 1 ? hit[0] : '';
+  };
+  const set = {}; const bem = [];
+  const kultur = pick(S.preise.map(p => p.kultur), v.kultur); if (kultur) set.kultur = kultur;
+  const wild = pick(L.wildart, v.wildart); if (wild) set.wildart = wild;
+  if (v.ort) set.schlag = v.ort.slice(0, 120);
+  if (v.gemarkung) set.gemarkung = v.gemarkung.slice(0, 80);
+  if (v['geschädigter']) set['gesch.name'] = v['geschädigter'].slice(0, 120);
+  bem.push('Vorerfasst über Jarvis' + (v.datum ? ' am ' + v.datum : '') + '.');
+  if (v.kultur && !kultur) bem.push('Kultur laut Diktat: ' + v.kultur + ' – bitte Kultur auswählen.');
+  if (v.wildart && !wild) bem.push('Wildart laut Diktat: ' + v.wildart + '.');
+  if (v['fläche']) bem.push('Geschätzte Schadfläche laut Diktat: ' + v['fläche'] + ' (noch nicht vermessen).');
+  if (v.notiz) bem.push(v.notiz);
+  return { set, bem: bem.join(' ').slice(0, 2000) };
+}
+
 /* ---------- Ansichten ---------- */
 const TABS = [['fall', 'Fall'], ['termine', 'Termine'], ['stellen', 'Schadstellen'], ['ertrag', 'Ertrag'], ['kosten', 'Wiederherstellung'], ['zeiten', 'Zeiten'], ['export', 'Ergebnis & Export']];
 
@@ -255,7 +281,7 @@ function vList() {
   <label><input type="search" id="search" placeholder="Suchen: Name, Flurstück, Az …" value="${esc(view.q || '')}"></label>
   <div class="seg">${[['', 'Alle (' + faelle.length + ')'], ...L.status.map(s => [s, s[0].toUpperCase() + s.slice(1) + ' (' + cnt(s) + ')'])].map(([k, t]) => `<button data-act="filter" data-v="${k}" class="${(view.st || '') === k ? 'on' : ''}">${t}</button>`).join('')}</div>
   ${faelle.length && (!S.lastBackupTs || Date.now() - S.lastBackupTs > 7 * 86400000) ? `<div class="note warn">${S.lastBackupTs ? 'Letzte Datensicherung ist über eine Woche her.' : 'Noch keine Datensicherung gemacht.'} <button class="btn sm" data-act="goBackup">💾 Jetzt sichern</button></div>` : ''}
-  <div class="btns" style="margin:0 0 10px"><label class="btn sm" style="margin:0">📥 Excel-Datei einlesen<input type="file" id="impIn" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label></div>
+  <div class="btns" style="margin:0 0 10px"><button class="btn sm" data-act="jarvisDlg">🎙 Aus Jarvis übernehmen</button><label class="btn sm" style="margin:0">📥 Excel-Datei einlesen<input type="file" id="impIn" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label></div>
   ${S.vorlageName ? '' : `<div class="note warn">Noch keine Excel-Vorlage geladen. Erfassen geht trotzdem – für den Export einmal unter ⚙ Einstellungen die Vorlage laden.</div>`}
   <div class="list">${list.map(f => {
     const r = calc(f); const fr = fristInfo(f)[0] === 'bad';
@@ -927,6 +953,17 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const a = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
   switch (a) {
+    case 'jarvisDlg': openDlg('Aus Jarvis übernehmen', `<p class="muted" style="margin-top:0">Den Übernahme-Text von Claude hier einfügen (lange tippen → Einfügen). Die App legt daraus einen neuen Fall an. Es wird nichts verschickt, alles bleibt auf diesem Handy.</p>
+      <label><textarea id="jarvisIn" style="min-height:160px" placeholder="JARVIS-WILDSCHADEN&#10;Ort: …&#10;Kultur: …"></textarea></label>
+      <div class="btns"><button class="btn sm" data-act="jarvisPaste">📋 Aus Zwischenablage</button><button class="btn pri" data-act="jarvisGo">Fall anlegen</button></div>`); break;
+    case 'jarvisPaste': try { $('#jarvisIn').value = await navigator.clipboard.readText(); } catch (err) { toast('Bitte lange ins Feld tippen und „Einfügen“ wählen'); } break;
+    case 'jarvisGo': {
+      const r = jarvisParse($('#jarvisIn').value);
+      if (!r) { toast('Kein Jarvis-Text erkannt. Er muss mit JARVIS-WILDSCHADEN beginnen.', 4000); break; }
+      cur = newFall(); Object.keys(r.set).forEach(k => setPath(cur, k, r.set[k])); cur.bemerkung = r.bem;
+      faelle.push(cur); await DB.put('faelle', cur); $('#dlg').close(); view = { name: 'fall', tab: 'fall' }; render(); window.scrollTo(0, 0);
+      toast('Fall ' + cur.az + ' angelegt – bitte Angaben prüfen', 4000); break;
+    }
     case 'new': cur = newFall(); faelle.push(cur); await DB.put('faelle', cur); view = { name: 'fall', tab: 'fall' }; render(); break;
     case 'open': cur = normFall(faelle.find(f => f.id === b.dataset.id)); view = { name: 'fall', tab: 'fall', q: view.q, st: view.st }; render(); window.scrollTo(0, 0); break;
     case 'filter': view.st = b.dataset.v; render(); break;
