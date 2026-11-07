@@ -1,7 +1,7 @@
 /* Wildschaden Feld – Stufe 1
    Erfassung am Feld, Vorschau-Berechnung, Export in die Excel-Vorlage. Alles offline. */
 'use strict';
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 
 /* ---------- Auswahllisten (aus Blatt „Listen“ der Vorlage) ---------- */
 const L = {
@@ -226,6 +226,12 @@ function Sel(label, k, opts, o = {}) {
 }
 
 /* ---------- Übernahme aus Jarvis (nur eingefügter Text, keine Verbindung nach außen) ---------- */
+function jarvisDate(s) { // 03.11.2026 / 3.11.26 / 2026-11-03 → 2026-11-03, sonst ''
+  s = String(s || '').trim(); let m;
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  if ((m = /^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/.exec(s))) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+  return '';
+}
 function jarvisParse(txt) {
   const lines = String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length || !/^JARVIS-WILDSCHADEN/i.test(lines[0])) return null;
@@ -243,7 +249,11 @@ function jarvisParse(txt) {
   if (v.ort) set.schlag = v.ort.slice(0, 120);
   if (v.gemarkung) set.gemarkung = v.gemarkung.slice(0, 80);
   if (v['geschädigter']) set['gesch.name'] = v['geschädigter'].slice(0, 120);
-  bem.push('Vorerfasst über Jarvis' + (v.datum ? ' am ' + v.datum : '') + '.');
+  const iso = jarvisDate(v.datum); if (iso) set.kenntnis = iso; // Datum → „Kenntnis vom Schaden“ (Fristprüfung)
+  bem.push('Vorerfasst über Jarvis' + (v.datum ? ' (Schaden festgestellt: ' + v.datum + ')' : '') + '.');
+  const tel = v.telefon || v.tel;
+  if (tel && !/^(fehlt|offen|-|–|unbekannt)/i.test(tel)) bem.push('Telefon Geschädigter: ' + tel.slice(0, 40) + '.');
+  else if (v['geschädigter']) bem.push('Telefon Geschädigter fehlt noch.');
   if (v.kultur && !kultur) bem.push('Kultur laut Diktat: ' + v.kultur + ' – bitte Kultur auswählen.');
   if (v.wildart && !wild) bem.push('Wildart laut Diktat: ' + v.wildart + '.');
   if (v['fläche']) bem.push('Geschätzte Schadfläche laut Diktat: ' + v['fläche'] + ' (noch nicht vermessen).');
@@ -954,7 +964,7 @@ document.addEventListener('click', async e => {
   const a = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
   switch (a) {
     case 'jarvisDlg': openDlg('Aus Jarvis übernehmen', `<p class="muted" style="margin-top:0">Den Übernahme-Text von Claude hier einfügen (lange tippen → Einfügen). Die App legt daraus einen neuen Fall an. Es wird nichts verschickt, alles bleibt auf diesem Handy.</p>
-      <label><textarea id="jarvisIn" style="min-height:160px" placeholder="JARVIS-WILDSCHADEN&#10;Ort: …&#10;Kultur: …"></textarea></label>
+      <label><textarea id="jarvisIn" style="min-height:160px" placeholder="JARVIS-WILDSCHADEN&#10;Datum: 03.11.2026&#10;Ort: Lieskau&#10;Wildart: Schwarzwild&#10;Kultur: Grünland&#10;Geschädigter: …&#10;Telefon: …"></textarea></label>
       <div class="btns"><button class="btn sm" data-act="jarvisPaste">📋 Aus Zwischenablage</button><button class="btn pri" data-act="jarvisGo">Fall anlegen</button></div>`); break;
     case 'jarvisPaste': try { $('#jarvisIn').value = await navigator.clipboard.readText(); } catch (err) { toast('Bitte lange ins Feld tippen und „Einfügen“ wählen'); } break;
     case 'jarvisGo': {
